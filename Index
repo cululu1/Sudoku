@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="h-full select-none overflow-hidden">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>極致數獨 App</title>
+    
+    <!-- PWA / App Mode Meta Tags -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="極致數獨">
+    <meta name="theme-color" content="#4f46e5">
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Canvas Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <!-- Dynamic Inline Manifest Link for PWA -->
+    <link rel="manifest" id="pwa-manifest">
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        
+        * {
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        html, body {
+            height: 100%;
+            width: 100%;
+            touch-action: manipulation;
+            overscroll-behavior: none;
+            font-family: 'Noto Sans TC', 'Fredoka', sans-serif;
+        }
+
+        /* 數獨棋盤邊框樣式 */
+        .sudoku-grid {
+            display: grid;
+            grid-template-columns: repeat(9, minmax(0, 1fr));
+            grid-template-rows: repeat(9, minmax(0, 1fr));
+            aspect-ratio: 1 / 1;
+            width: 100%;
+            height: 100%;
+            border: 3.5px solid #312e81;
+            box-shadow: 0 8px 20px -4px rgba(79, 70, 229, 0.25);
+        }
+
+        .cell {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.1s ease, transform 0.1s ease;
+            position: relative;
+            border-right: 1px solid #cbd5e1;
+            border-bottom: 1px solid #cbd5e1;
+            box-sizing: border-box;
+        }
+
+        /* 宮格 3x3 加粗明顯分界線 */
+        .cell-border-r-thick {
+            border-right: 3px solid #312e81 !important;
+        }
+        .cell-border-b-thick {
+            border-bottom: 3px solid #312e81 !important;
+        }
+        .cell:nth-child(9n) {
+            border-right: none;
+        }
+        .cell:nth-child(n+73) {
+            border-bottom: none;
+        }
+
+        /* 草稿筆記網格 */
+        .notes-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            width: 100%;
+            height: 100%;
+            padding: 1.5px;
+            font-size: 0.6rem;
+            line-height: 1;
+            color: #64748b;
+            font-weight: 600;
+        }
+
+        .note-num {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-4px); }
+            40%, 80% { transform: translateX(4px); }
+        }
+        .animate-shake {
+            animation: shake 0.3s ease-in-out;
+        }
+
+        @keyframes pop {
+            0% { transform: scale(0.85); }
+            50% { transform: scale(1.08); }
+            100% { transform: scale(1); }
+        }
+        .animate-pop {
+            animation: pop 0.15s ease-out;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 h-full flex flex-col justify-between p-2 sm:p-4 max-w-md mx-auto overflow-y-auto">
+
+    <main class="flex-1 flex flex-col justify-evenly gap-1.5 py-1 min-h-0">
+        
+        <!-- 難度選擇與音效切換 -->
+        <div class="flex items-center bg-slate-200/80 p-1 rounded-xl border border-slate-300 shadow-inner shrink-0 gap-1">
+            <button onclick="changeDifficulty('easy')" id="diff-easy" class="flex-1 py-1.5 text-xs font-bold rounded-lg transition duration-200 text-slate-600">
+                簡單
+            </button>
+            <button onclick="changeDifficulty('medium')" id="diff-medium" class="flex-1 py-1.5 text-xs font-bold rounded-lg transition duration-200 text-slate-600">
+                中等
+            </button>
+            <button onclick="changeDifficulty('hard')" id="diff-hard" class="flex-1 py-1.5 text-xs font-bold rounded-lg transition duration-200 text-slate-600">
+                困難
+            </button>
+            <!-- 音效切換按鈕 -->
+            <button id="btn-sound" onclick="toggleSound()" class="w-7 h-7 rounded-lg bg-white hover:bg-slate-100 text-slate-700 flex items-center justify-center transition shrink-0 shadow-sm">
+                <i id="sound-icon" class="fa-solid fa-volume-high text-xs"></i>
+            </button>
+        </div>
+
+        <!-- 數據資訊欄 (錯誤、計時器、最高紀錄) -->
+        <div class="grid grid-cols-3 gap-1 bg-white p-2 rounded-xl border border-slate-200 shadow-sm text-center shrink-0">
+            <!-- 失誤紀錄 -->
+            <div class="flex flex-col items-center justify-center">
+                <span class="text-[10px] text-slate-400 font-semibold mb-0.5">失誤</span>
+                <div class="flex items-center gap-1 font-bold text-xs sm:text-sm">
+                    <i class="fa-solid fa-heart text-rose-500 text-[10px]"></i>
+                    <span id="mistakes-count" class="text-rose-600">0 / 2</span>
+                </div>
+            </div>
+
+            <!-- 計時器 -->
+            <div class="flex flex-col items-center justify-center border-x border-slate-100 px-1">
+                <div class="flex items-center gap-1 text-[10px] text-slate-400 font-semibold mb-0.5">
+                    <span>時間</span>
+                    <button id="btn-pause" onclick="togglePause()" class="hover:text-indigo-600 transition">
+                        <i id="pause-icon" class="fa-solid fa-pause text-[9px]"></i>
+                    </button>
+                </div>
+                <span id="timer-display" class="font-bold text-indigo-600 font-mono text-xs sm:text-sm">00:00</span>
+            </div>
+
+            <!-- 最快紀錄 -->
+            <div class="flex flex-col items-center justify-center">
+                <span class="text-[10px] text-slate-400 font-semibold mb-0.5">最高紀錄</span>
+                <div class="flex items-center gap-1 font-bold text-xs sm:text-sm text-amber-500">
+                    <i class="fa-solid fa-trophy text-[10px]"></i>
+                    <span id="best-time-display" class="font-mono">--:--</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 數獨棋盤區域 -->
+        <div class="relative w-full max-w-[min(100%,48vh)] aspect-square mx-auto shrink-0 my-auto">
+            <div id="sudoku-board" class="sudoku-grid w-full h-full bg-white rounded-xl overflow-hidden shadow-md">
+                <!-- 81 個格子將由 JS 生成 -->
+            </div>
+
+            <!-- 暫停遮罩 -->
+            <div id="pause-overlay" class="hidden absolute inset-0 bg-white/95 backdrop-blur-md rounded-xl flex flex-col items-center justify-center z-20 gap-3">
+                <i class="fa-solid fa-circle-pause text-indigo-600 text-4xl animate-bounce"></i>
+                <p class="text-slate-800 font-bold text-base">遊戲已暫停</p>
+                <button onclick="togglePause()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg transition text-sm">
+                    繼續對局
+                </button>
+            </div>
+        </div>
+
+        <!-- 1. 數字鍵盤 (1-9) 置於上方 -->
+        <div id="numpad" class="grid grid-cols-9 gap-1 w-full shrink-0">
+            <!-- 1 ~ 9 按鈕動態生成 -->
+        </div>
+
+        <!-- 2. 工具按鈕 (復原, 清除, 草稿, 提示) 置於下方 -->
+        <div class="grid grid-cols-4 gap-1.5 w-full shrink-0">
+            <button onclick="undoMove()" class="flex flex-col items-center justify-center py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 shadow-sm transition active:scale-95">
+                <i class="fa-solid fa-rotate-left text-sm mb-0.5"></i>
+                <span class="text-[11px] font-semibold">復原</span>
+            </button>
+
+            <button onclick="eraseCell()" class="flex flex-col items-center justify-center py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 shadow-sm transition active:scale-95">
+                <i class="fa-solid fa-eraser text-sm mb-0.5"></i>
+                <span class="text-[11px] font-semibold">清除</span>
+            </button>
+
+            <button id="btn-note" onclick="toggleNoteMode()" class="flex flex-col items-center justify-center py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 shadow-sm transition active:scale-95 relative">
+                <div id="note-badge" class="absolute top-1 right-2 w-1.5 h-1.5 rounded-full bg-slate-400"></div>
+                <i class="fa-solid fa-pencil text-sm mb-0.5"></i>
+                <span class="text-[11px] font-semibold">草稿模式</span>
+            </button>
+
+            <button onclick="useHint()" class="flex flex-col items-center justify-center py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-amber-600 shadow-sm transition active:scale-95">
+                <i class="fa-solid fa-lightbulb text-sm mb-0.5"></i>
+                <span class="text-[11px] font-semibold">提示</span>
+            </button>
+        </div>
+
+        <!-- 新遊戲按鈕 -->
+        <div class="flex justify-center shrink-0">
+            <button onclick="startNewGame()" class="w-full py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl shadow-md flex items-center justify-center gap-2 transition transform active:scale-95 text-xs sm:text-sm">
+                <i class="fa-solid fa-plus text-xs"></i>
+                <span>開啟新對局</span>
+            </button>
+        </div>
+    </main>
+
+    <!-- 結算彈窗 -->
+    <div id="modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 rounded-3xl p-5 max-w-xs w-full text-center shadow-2xl">
+            <div id="modal-icon-win" class="hidden w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3 border border-emerald-300">
+                <i class="fa-solid fa-trophy text-2xl"></i>
+            </div>
+            <div id="modal-icon-lose" class="hidden w-14 h-14 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-3 border border-rose-300">
+                <i class="fa-solid fa-skull text-2xl"></i>
+            </div>
+
+            <h2 id="modal-title" class="text-xl font-bold text-slate-900 mb-1">挑戰成功！</h2>
+            <p id="modal-message" class="text-slate-600 text-xs mb-4">你成功順利解開了這局數獨。</p>
+
+            <div class="bg-slate-50 rounded-2xl p-3 mb-4 text-left space-y-1.5 text-xs border border-slate-200">
+                <div class="flex justify-between">
+                    <span class="text-slate-500">當前難度:</span>
+                    <span id="modal-stat-diff" class="font-semibold text-slate-800">簡單</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-slate-500">通關用時:</span>
+                    <span id="modal-stat-time" class="font-mono font-bold text-indigo-600">02:15</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-slate-500">失誤紀錄:</span>
+                    <span id="modal-stat-mistakes" class="font-bold text-rose-600">1 / 2</span>
+                </div>
+            </div>
+
+            <button onclick="closeModalAndRestart()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-md transition text-sm">
+                再玩一局
+            </button>
+        </div>
+    </div>
+
+    <!-- iOS 安裝提示 Modal -->
+    <div id="ios-install-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-5 max-w-xs w-full text-center shadow-2xl space-y-3">
+            <div class="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto">
+                <i class="fa-solid fa-mobile-screen text-2xl"></i>
+            </div>
+            <h3 class="text-base font-bold text-slate-800">安裝為桌面 App</h3>
+            <p class="text-xs text-slate-600 leading-relaxed">
+                在 Safari 瀏覽器中，點擊下方選單的 <i class="fa-solid fa-share-from-square text-indigo-600"></i> **分享** 按鈕，然後選擇 **「新增至主畫面」** 即可將數獨安裝為 App！
+            </p>
+            <button onclick="document.getElementById('ios-install-modal').classList.add('hidden')" class="w-full py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs">
+                我知道了
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let currentDifficulty = 'easy';
+        let grid = Array(9).fill(0).map(() => Array(9).fill(0));
+        let solution = Array(9).fill(0).map(() => Array(9).fill(0));
+        let initialMask = Array(9).fill(false).map(() => Array(9).fill(false));
+        let notes = Array(9).fill(0).map(() => Array(9).fill(0).map(() => new Set()));
+
+        let selectedCell = null;
+        let mistakes = 0;
+        const MAX_MISTAKES = 2; // 最多可錯 2 次 (第3次失敗)
+        let isNoteMode = false;
+        let historyStack = [];
+
+        let timerSeconds = 0;
+        let timerInterval = null;
+        let isPaused = false;
+        let soundEnabled = true;
+
+        let deferredInstallPrompt = null;
+
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        let audioCtx = null;
+
+        function playSound(type) {
+            if (!soundEnabled) return;
+            try {
+                if (!audioCtx) audioCtx = new AudioCtx();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                const now = audioCtx.currentTime;
+                if (type === 'click') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(420, now);
+                    gain.gain.setValueAtTime(0.04, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+                    osc.start(now);
+                    osc.stop(now + 0.04);
+                } else if (type === 'error') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(180, now);
+                    gain.gain.setValueAtTime(0.08, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+                    osc.start(now);
+                    osc.stop(now + 0.2);
+                } else if (type === 'win') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(523.25, now);
+                    osc.frequency.setValueAtTime(659.25, now + 0.08);
+                    osc.frequency.setValueAtTime(783.99, now + 0.16);
+                    gain.gain.setValueAtTime(0.12, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+                    osc.start(now);
+                    osc.stop(now + 0.5);
+                }
+            } catch(e) {}
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            const icon = document.getElementById('sound-icon');
+            icon.className = soundEnabled ? 'fa-solid fa-volume-high text-xs' : 'fa-solid fa-volume-xmark text-xs text-slate-400';
+        }
+
+        function initPWA() {
+            const manifestObj = {
+                name: "極致數獨 App",
+                short_name: "數獨App",
+                start_url: ".",
+                display: "standalone",
+                background_color: "#f8fafc",
+                theme_color: "#4f46e5",
+                icons: [{
+                    src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%234f46e5'/><text x='50' y='68' font-size='55' font-weight='bold' text-anchor='middle' fill='white'>9</text></svg>",
+                    sizes: "192x192 512x512",
+                    type: "image/svg+xml"
+                }]
+            };
+            const manifestBlob = new Blob([JSON.stringify(manifestObj)], {type: 'application/json'});
+            document.getElementById('pwa-manifest').href = URL.createObjectURL(manifestBlob);
+
+            window.addEventListener('beforeinstallprompt', (e) => {
+                e.preventDefault();
+                deferredInstallPrompt = e;
+                const btn = document.getElementById('btn-install');
+                if (btn) btn.classList.remove('hidden');
+            });
+        }
+
+        function installApp() {
+            if (deferredInstallPrompt) {
+                deferredInstallPrompt.prompt();
+                deferredInstallPrompt.userChoice.then(() => {
+                    deferredInstallPrompt = null;
+                    const btn = document.getElementById('btn-install');
+                    if (btn) btn.classList.add('hidden');
+                });
+            } else {
+                document.getElementById('ios-install-modal').classList.remove('hidden');
+            }
+        }
+
+        function isValidPlacement(board, r, c, num) {
+            for (let i = 0; i < 9; i++) {
+                if (board[r][i] === num) return false;
+                if (board[i][c] === num) return false;
+                let boxR = 3 * Math.floor(r / 3) + Math.floor(i / 3);
+                let boxC = 3 * Math.floor(c / 3) + (i % 3);
+                if (board[boxR][boxC] === num) return false;
+            }
+            return true;
+        }
+
+        function fillSudoku(board) {
+            for (let r = 0; r < 9; r++) {
+                for (let c = 0; c < 9; c++) {
+                    if (board[r][c] === 0) {
+                        let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5);
+                        for (let num of nums) {
+                            if (isValidPlacement(board, r, c, num)) {
+                                board[r][c] = num;
+                                if (fillSudoku(board)) return true;
+                                board[r][c] = 0;
+                            }
+                        }
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        function generateSudoku(difficulty) {
+            solution = Array(9).fill(0).map(() => Array(9).fill(0));
+            fillSudoku(solution);
+
+            grid = solution.map(row => [...row]);
+
+            let removeCount = 38;
+            if (difficulty === 'medium') removeCount = 46;
+            if (difficulty === 'hard') removeCount = 54;
+
+            initialMask = Array(9).fill(false).map(() => Array(9).fill(false));
+            
+            let cells = [];
+            for (let r = 0; r < 9; r++) {
+                for (let c = 0; c < 9; c++) {
+                    cells.push({r, c});
+                }
+            }
+            cells.sort(() => Math.random() - 0.5);
+
+            for (let i = 0; i < removeCount; i++) {
+                let {r, c} = cells[i];
+                grid[r][c] = 0;
+            }
+
+            for (let r = 0; r < 9; r++) {
+                for (let c = 0; c < 9; c++) {
+                    if (grid[r][c] !== 0) initialMask[r][c] = true;
+                }
+            }
+        }
+
+        function initBoardUI() {
+            const boardEl = document.getElementById('sudoku-board');
+            boardEl.innerHTML = '';
+
+            for (let r = 0; r < 9; r++) {
+                for (let c = 0; c < 9; c++) {
+                    const cellEl = document.createElement('div');
+                    cellEl.dataset.row = r;
+                    cellEl.dataset.col = c;
+                    
+                    let borderClasses = 'cell ';
+                    if (c === 2 || c === 5) borderClasses += 'cell-border-r-thick ';
+                    if (r === 2 || r === 5) borderClasses += 'cell-border-b-thick ';
+                    
+                    cellEl.className = borderClasses + 'bg-white text-slate-800';
+                    cellEl.onclick = () => selectCell(r, c);
+
+                    boardEl.appendChild(cellEl);
+                }
+            }
+
+            // 生成數字鍵盤 1-9
+            const numpadEl = document.getElementById('numpad');
+            numpadEl.innerHTML = '';
+            for (let i = 1; i <= 9; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'py-2 rounded-xl bg-white border border-slate-200 hover:bg-indigo-50 hover:border-indigo-300 text-slate-900 font-extrabold text-base shadow-sm transition active:scale-90 flex items-center justify-center';
+                btn.innerHTML = `<span>${i}</span>`;
+                btn.onclick = () => inputNumber(i);
+                numpadEl.appendChild(btn);
+            }
+        }
+
+        function renderBoard() {
+            const boardEl = document.getElementById('sudoku-board');
+            const selectedVal = (selectedCell && grid[selectedCell.r][selectedCell.c] !== 0) 
+                ? grid[selectedCell.r][selectedCell.c] 
+                : null;
+
+            for (let r = 0; r < 9; r++) {
+                for (let c = 0; c < 9; c++) {
+                    const index = r * 9 + c;
+                    const cellEl = boardEl.children[index];
+                    const val = grid[r][c];
+                    const isInitial = initialMask[r][c];
+
+                    cellEl.innerHTML = '';
+
+                    if (val !== 0) {
+                        cellEl.textContent = val;
+                        if (isInitial) {
+                            cellEl.className = cellEl.className.replace(/text-\S+/g, '') + ' font-extrabold text-slate-900 text-lg sm:text-2xl';
+                        } else {
+                            cellEl.className = cellEl.className.replace(/text-\S+/g, '') + ' font-bold text-indigo-600 text-lg sm:text-2xl animate-pop';
+                        }
+                    } else {
+                        const cellNotes = notes[r][c];
+                        if (cellNotes.size > 0) {
+                            const notesGrid = document.createElement('div');
+                            notesGrid.className = 'notes-grid';
+                            for (let n = 1; n <= 9; n++) {
+                                const noteNum = document.createElement('div');
+                                noteNum.className = 'note-num';
+                                noteNum.textContent = cellNotes.has(n) ? n : '';
+                                notesGrid.appendChild(noteNum);
+                            }
+                            cellEl.appendChild(notesGrid);
+                        }
+                    }
+
+                    let bgClass = 'bg-white';
+
+                    if (selectedCell) {
+                        const isSelected = selectedCell.r === r && selectedCell.c === c;
+                        const isSameRowCol = selectedCell.r === r || selectedCell.c === c;
+                        const isSameBox = Math.floor(selectedCell.r / 3) === Math.floor(r / 3) &&
+                                          Math.floor(selectedCell.c / 3) === Math.floor(c / 3);
+
+                        if (isSelected) {
+                            bgClass = 'bg-indigo-100 ring-2 ring-indigo-500 z-10';
+                        } else if (selectedVal && val === selectedVal) {
+                            bgClass = 'bg-indigo-200/80 border-indigo-400';
+                        } else if (isSameRowCol || isSameBox) {
+                            bgClass = 'bg-slate-100/90';
+                        }
+                    }
+
+                    let borderClasses = 'cell ';
+                    if (c === 2 || c === 5) borderClasses += 'cell-border-r-thick ';
+                    if (r === 2 || r === 5) borderClasses += 'cell-border-b-thick ';
+                    cellEl.className = `${borderClasses} ${bgClass} cursor-pointer select-none transition-all duration-100`;
+                }
+            }
+        }
+
+        function selectCell(r, c) {
+            if (isPaused) return;
+            selectedCell = { r, c };
+            playSound('click');
+            renderBoard();
+        }
+
+        function inputNumber(num) {
+            if (isPaused || !selectedCell) return;
+            const { r, c } = selectedCell;
+
+            if (initialMask[r][c]) return;
+
+            pushHistory();
+
+            if (isNoteMode) {
+                playSound('click');
+                if (notes[r][c].has(num)) {
+                    notes[r][c].delete(num);
+                } else {
+                    notes[r][c].add(num);
+                }
+                grid[r][c] = 0;
+            } else {
+                if (grid[r][c] === num) return;
+
+                if (solution[r][c] === num) {
+                    playSound('click');
+                    grid[r][c] = num;
+                    notes[r][c].clear();
+                    clearRelatedNotes(r, c, num);
+
+                    if (checkVictory()) handleVictory();
+                } else {
+                    playSound('error');
+                    mistakes++;
+                    updateMistakesDisplay();
+
+                    const index = r * 9 + c;
+                    const cellEl = document.getElementById('sudoku-board').children[index];
+                    cellEl.classList.add('animate-shake', 'bg-rose-200');
+                    setTimeout(() => cellEl.classList.remove('animate-shake', 'bg-rose-200'), 350);
+
+                    if (mistakes > MAX_MISTAKES) {
+                        handleGameOver();
+                        return;
+                    }
+                }
+            }
+
+            saveGameState();
+            renderBoard();
+        }
+
+        function clearRelatedNotes(r, c, num) {
+            for (let i = 0; i < 9; i++) {
+                notes[r][i].delete(num);
+                notes[i][c].delete(num);
+                let boxR = 3 * Math.floor(r / 3) + Math.floor(i / 3);
+                let boxC = 3 * Math.floor(c / 3) + (i % 3);
+                notes[boxR][boxC].delete(num);
+            }
+        }
+
+        function eraseCell() {
+            if (isPaused || !selectedCell) return;
+            const { r, c } = selectedCell;
+            if (initialMask[r][c]) return;
+
+            pushHistory();
+            grid[r][c] = 0;
+            notes[r][c].clear();
+            playSound('click');
+            saveGameState();
+            renderBoard();
+        }
+
+        function toggleNoteMode() {
+            isNoteMode = !isNoteMode;
+            const btn = document.getElementById('btn-note');
+            const badge = document.getElementById('note-badge');
+            
+            if (isNoteMode) {
+                btn.classList.add('bg-indigo-600', 'text-white', 'border-indigo-600');
+                btn.classList.remove('bg-white', 'text-slate-700', 'border-slate-200');
+                badge.className = 'absolute top-1 right-2 w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping';
+            } else {
+                btn.classList.remove('bg-indigo-600', 'text-white', 'border-indigo-600');
+                btn.classList.add('bg-white', 'text-slate-700', 'border-slate-200');
+                badge.className = 'absolute top-1 right-2 w-1.5 h-1.5 rounded-full bg-slate-400';
+            }
+            playSound('click');
+        }
+
+        function useHint() {
+            if (isPaused) return;
+
+            let targetR = -1, targetC = -1;
+
+            if (selectedCell && grid[selectedCell.r][selectedCell.c] === 0) {
+                targetR = selectedCell.r;
+                targetC = selectedCell.c;
+            } else {
+                let emptyCells = [];
+                for (let r = 0; r < 9; r++) {
+                    for (let c = 0; c < 9; c++) {
+                        if (grid[r][c] === 0) emptyCells.push({ r, c });
+                    }
+                }
+                if (emptyCells.length === 0) return;
+                let randomCell = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+                targetR = randomCell.r;
+                targetC = randomCell.c;
+            }
+
+            pushHistory();
+            grid[targetR][targetC] = solution[targetR][targetC];
+            notes[targetR][targetC].clear();
+            clearRelatedNotes(targetR, targetC, solution[targetR][targetC]);
+            
+            selectedCell = { r: targetR, c: targetC };
+            playSound('click');
+            saveGameState();
+            renderBoard();
+
+            if (checkVictory()) handleVictory();
+        }
+
+        function pushHistory() {
+            const gridCopy = grid.map(row => [...row]);
+            const notesCopy = notes.map(row => row.map(set => new Set(set)));
+            historyStack.push({
+                grid: gridCopy,
+                notes: notesCopy,
+                mistakes: mistakes
+            });
+            if (historyStack.length > 20) historyStack.shift();
+        }
+
+        function undoMove() {
+            if (isPaused || historyStack.length === 0) return;
+            const lastState = historyStack.pop();
+            grid = lastState.grid;
+            notes = lastState.notes;
+            mistakes = lastState.mistakes;
+            updateMistakesDisplay();
+            playSound('click');
+            saveGameState();
+            renderBoard();
+        }
+
+        function saveGameState() {
+            const serializedNotes = notes.map(row => row.map(set => Array.from(set)));
+            const state = {
+                currentDifficulty,
+                grid,
+                solution,
+                initialMask,
+                notes: serializedNotes,
+                mistakes,
+                timerSeconds
+            };
+            localStorage.setItem('sudoku_active_game', JSON.stringify(state));
+        }
+
+        function loadSavedGame() {
+            const raw = localStorage.getItem('sudoku_active_game');
+            if (!raw) return false;
+            try {
+                const state = JSON.parse(raw);
+                currentDifficulty = state.currentDifficulty || 'easy';
+                grid = state.grid;
+                solution = state.solution;
+                initialMask = state.initialMask;
+                notes = state.notes.map(row => row.map(arr => new Set(arr)));
+                mistakes = state.mistakes || 0;
+                timerSeconds = state.timerSeconds || 0;
+                return true;
+            } catch(e) {
+                return false;
+            }
+        }
+
+        function clearSavedGame() {
+            localStorage.removeItem('sudoku_active_game');
+        }
+
+        function startTimer() {
+            clearInterval(timerInterval);
+            updateTimerDisplay();
+            timerInterval = setInterval(() => {
+                if (!isPaused) {
+                    timerSeconds++;
+                    updateTimerDisplay();
+                    if (timerSeconds % 3 === 0) saveGameState();
+                }
+            }, 1000);
+        }
+
+        function updateTimerDisplay() {
+            const mins = String(Math.floor(timerSeconds / 60)).padStart(2, '0');
+            const secs = String(timerSeconds % 60).padStart(2, '0');
+            document.getElementById('timer-display').textContent = `${mins}:${secs}`;
+        }
+
+        function togglePause() {
+            isPaused = !isPaused;
+            const overlay = document.getElementById('pause-overlay');
+            const icon = document.getElementById('pause-icon');
+
+            if (isPaused) {
+                overlay.classList.remove('hidden');
+                icon.className = 'fa-solid fa-play text-[9px]';
+            } else {
+                overlay.classList.add('hidden');
+                icon.className = 'fa-solid fa-pause text-[9px]';
+            }
+        }
+
+        function updateMistakesDisplay() {
+            document.getElementById('mistakes-count').textContent = `${mistakes} / ${MAX_MISTAKES}`;
+        }
+
+        function loadBestTime() {
+            const best = localStorage.getItem(`sudoku_best_${currentDifficulty}`);
+            const displayEl = document.getElementById('best-time-display');
+            if (best) {
+                const sec = parseInt(best);
+                const mins = String(Math.floor(sec / 60)).padStart(2, '0');
+                const secs = String(sec % 60).padStart(2, '0');
+                displayEl.textContent = `${mins}:${secs}`;
+            } else {
+                displayEl.textContent = '--:--';
+            }
+        }
+
+        function checkVictory() {
+            for (let r = 0; r < 9; r++) {
+                for (let c = 0; c < 9; c++) {
+                    if (grid[r][c] !== solution[r][c]) return false;
+                }
+            }
+            return true;
+        }
+
+        function handleVictory() {
+            clearInterval(timerInterval);
+            clearSavedGame();
+            playSound('win');
+
+            if (window.confetti) {
+                confetti({ particleCount: 90, spread: 60, origin: { y: 0.6 } });
+            }
+
+            const currentBest = localStorage.getItem(`sudoku_best_${currentDifficulty}`);
+            let isNewRecord = false;
+            if (!currentBest || timerSeconds < parseInt(currentBest)) {
+                localStorage.setItem(`sudoku_best_${currentDifficulty}`, timerSeconds);
+                isNewRecord = true;
+                loadBestTime();
+            }
+
+            const mins = String(Math.floor(timerSeconds / 60)).padStart(2, '0');
+            const secs = String(timerSeconds % 60).padStart(2, '0');
+
+            document.getElementById('modal-title').textContent = isNewRecord ? '🎉 創下全新紀錄！' : '🎉 挑戰成功！';
+            document.getElementById('modal-message').textContent = isNewRecord 
+                ? '恭喜你刷刷新了該難度的最快紀錄！' 
+                : '太棒了，你成功解開了這局數獨！';
+            document.getElementById('modal-stat-diff').textContent = getDiffLabel(currentDifficulty);
+            document.getElementById('modal-stat-time').textContent = `${mins}:${secs}`;
+            document.getElementById('modal-stat-mistakes').textContent = `${mistakes} / ${MAX_MISTAKES}`;
+
+            document.getElementById('modal-icon-win').classList.remove('hidden');
+            document.getElementById('modal-icon-lose').classList.add('hidden');
+            document.getElementById('modal').classList.remove('hidden');
+        }
+
+        function handleGameOver() {
+            clearInterval(timerInterval);
+            clearSavedGame();
+            playSound('error');
+
+            const mins = String(Math.floor(timerSeconds / 60)).padStart(2, '0');
+            const secs = String(timerSeconds % 60).padStart(2, '0');
+
+            document.getElementById('modal-title').textContent = '💥 遊戲結束';
+            document.getElementById('modal-message').textContent = `很遺憾，你的失誤次數超過上限 (${MAX_MISTAKES} 次)。`;
+            document.getElementById('modal-stat-diff').textContent = getDiffLabel(currentDifficulty);
+            document.getElementById('modal-stat-time').textContent = `${mins}:${secs}`;
+            document.getElementById('modal-stat-mistakes').textContent = `${mistakes} / ${MAX_MISTAKES}`;
+
+            document.getElementById('modal-icon-win').classList.add('hidden');
+            document.getElementById('modal-icon-lose').classList.remove('hidden');
+            document.getElementById('modal').classList.remove('hidden');
+        }
+
+        function closeModalAndRestart() {
+            document.getElementById('modal').classList.add('hidden');
+            startNewGame();
+        }
+
+        function getDiffLabel(diff) {
+            if (diff === 'easy') return '簡單';
+            if (diff === 'medium') return '中等';
+            if (diff === 'hard') return '困難';
+            return '簡單';
+        }
+
+        function changeDifficulty(diff) {
+            currentDifficulty = diff;
+            updateDifficultyUI();
+            startNewGame();
+        }
+
+        function updateDifficultyUI() {
+            ['easy', 'medium', 'hard'].forEach(d => {
+                const btn = document.getElementById(`diff-${d}`);
+                if (d === currentDifficulty) {
+                    btn.className = 'flex-1 py-1.5 text-xs font-bold rounded-lg bg-indigo-600 text-white shadow-md transition duration-200';
+                } else {
+                    btn.className = 'flex-1 py-1.5 text-xs font-bold rounded-lg text-slate-500 hover:text-slate-800 transition duration-200';
+                }
+            });
+            loadBestTime();
+        }
+
+        function startNewGame() {
+            clearSavedGame();
+            mistakes = 0;
+            selectedCell = null;
+            historyStack = [];
+            isPaused = false;
+            timerSeconds = 0;
+            document.getElementById('pause-overlay').classList.add('hidden');
+            document.getElementById('pause-icon').className = 'fa-solid fa-pause text-[9px]';
+
+            notes = Array(9).fill(0).map(() => Array(9).fill(0).map(() => new Set()));
+
+            generateSudoku(currentDifficulty);
+            updateMistakesDisplay();
+            startTimer();
+            saveGameState();
+            renderBoard();
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (isPaused) return;
+
+            if (e.key >= '1' && e.key <= '9') {
+                inputNumber(parseInt(e.key));
+            } else if (e.key === 'Backspace' || e.key === 'Delete') {
+                eraseCell();
+            } else if (e.key === 'n' || e.key === 'N') {
+                toggleNoteMode();
+            } else if (e.key.startsWith('Arrow')) {
+                if (!selectedCell) {
+                    selectedCell = { r: 0, c: 0 };
+                } else {
+                    let { r, c } = selectedCell;
+                    if (e.key === 'ArrowUp') r = Math.max(0, r - 1);
+                    if (e.key === 'ArrowDown') r = Math.min(8, r + 1);
+                    if (e.key === 'ArrowLeft') c = Math.max(0, c - 1);
+                    if (e.key === 'ArrowRight') c = Math.min(8, c + 1);
+                    selectedCell = { r, c };
+                }
+                renderBoard();
+            }
+        });
+
+        // 頁面離線/關閉前自動保存狀態
+        window.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') saveGameState();
+        });
+
+        // 初始化
+        window.onload = function() {
+            initPWA();
+            initBoardUI();
+            
+            const hasRestored = loadSavedGame();
+            updateDifficultyUI();
+            updateMistakesDisplay();
+
+            if (hasRestored) {
+                startTimer();
+                renderBoard();
+            } else {
+                startNewGame();
+            }
+        };
+    </script>
+</body>
+</html>
